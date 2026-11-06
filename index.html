@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>머니브루 Money Brew</title>
+  <meta name="description" content="하루 10분, 유익한 실시간 경제 상식 발전소" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☕</text></svg>" />
+
+  <!--
+    ============================================================
+    머니브루 (Money Brew) — 단일 HTML 버전
+    ------------------------------------------------------------
+    · 빌드 과정 없이 이 파일 하나만 넷리파이에 올리면 동작합니다.
+    · React / Tailwind / Babel은 CDN에서 불러오고,
+      아래 <script type="text/babel"> 안의 코드는 브라우저가 실행 시 변환합니다.
+    · 수정 위치 안내
+        - 기본 설정(모델명·초기 원두)  : 스크립트 맨 위 "기본 설정"
+        - 뉴스·퀴즈 콘텐츠            : DAILY_NEWS_POOL, COMMON_SENSE_QUIZZES
+        - 상점 아이템                  : STORE_ITEMS
+        - 화면(UI)                     : function App() 의 return 부분
+    ============================================================
+  -->
+
+  <!-- Tailwind CSS (Play CDN) -->
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script>
+    // 원본 코드에서 쓰인 비표준 크기(4.5, 5.5)와 색상(slate-850), fadeIn 애니메이션을 등록
+    tailwind.config = {
+      theme: {
+        extend: {
+          spacing: { '4.5': '1.125rem', '5.5': '1.375rem' },
+          colors: { slate: { 850: '#172033' } },
+          keyframes: { fadeIn: { '0%': { opacity: '0', transform: 'translateY(4px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } } },
+          animation: { fadeIn: 'fadeIn 0.3s ease-out' }
+        }
+      }
+    };
+  </script>
+
+  <!-- React 18 + Babel (JSX를 브라우저에서 변환) -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
+
+  <style>
+    body { background-color: #0f172a; font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif; }
+    details > summary::-webkit-details-marker { display: none; }
+    #boot { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div id="root"><div id="boot">☕ 머니브루를 준비하고 있어요...</div></div>
+
+  <script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+// ============================================================
+// ⚙️ 기본 설정 (여기만 바꿔도 앱 동작을 조정할 수 있어요)
+// ============================================================
+// Gemini 모델 ID. 원본의 'gemini-2.5-flash-preview-09-2025'는 2026년 2월 서비스 종료됨.
+// 다른 모델을 쓰려면 이 값만 바꾸세요. (예: 'gemini-3.6-flash', 'gemini-2.5-flash-lite')
+const GEMINI_MODEL = 'gemini-2.5-flash';
+const STORAGE_KEY_BEANS = 'mb_beans_clean';   // 원두 포인트 저장 키
+const INITIAL_BEANS = 100;                      // 처음 방문 시 지급 원두
+
+// 오늘 날짜를 "2026. 09. 11" 형식으로 반환
+const getTodayString = () => {
+  const d = new Date();
+  return `${d.getFullYear()}. ${String(d.getMonth() + 1).padStart(2, '0')}. ${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// localStorage 안전 래퍼 (사생활 보호 모드 등에서 오류가 나도 앱이 멈추지 않도록)
+const safeStorage = {
+  get(key) { try { return window.localStorage.getItem(key); } catch (e) { return null; } },
+  set(key, value) { try { window.localStorage.setItem(key, value); } catch (e) { /* 무시 */ } }
+};
+
+// --- 커스텀 SVG 아이콘 컴포넌트 ---
+const IconCoffee = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 8h1a4 4 0 1 1 0 8h-1" />
+    <path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z" />
+    <line x1="6" x2="6" y1="2" y2="4" />
+    <line x1="10" x2="10" y1="2" y2="4" />
+    <line x1="14" x2="14" y1="2" y2="4" />
+  </svg>
+);
+
+const IconNewspaper = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 1 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2" />
+    <path d="M18 14h-8" />
+    <path d="M15 18h-5" />
+    <path d="M10 6h8v4h-8V6Z" />
+  </svg>
+);
+
+const IconBrain = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z" />
+    <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-4.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2Z" />
+  </svg>
+);
+
+const IconTrendingUp = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+    <polyline points="16 7 22 7 22 13" />
+  </svg>
+);
+
+const IconAward = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="8" r="7" />
+    <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88" />
+  </svg>
+);
+
+const IconSparkles = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+    <path d="m5 3 1 2.5L8.5 6 6 7 5 9.5 4 7 1.5 6 4 5.5 5 3Z" />
+    <path d="m19 17 1 2.5 2.5.5-2.5 1-1 2.5-1-2.5-2.5-1 2.5-1 1-2.5Z" />
+  </svg>
+);
+
+const IconFlame = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+  </svg>
+);
+
+const IconRefresh = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+    <path d="M21 3v5h-5" />
+    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+    <path d="M8 16H3v5" />
+  </svg>
+);
+
+const IconCheck = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const IconChevronRight = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 18 15 12 9 6" />
+  </svg>
+);
+
+const IconSettings = ({ className = "w-6 h-6" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+);
+
+// --- 청소년도 안전한 건전한 뉴스 풀 (정답 쏠림 완전 분산 적용) ---
+const DAILY_NEWS_POOL = [
+  {
+    topic: "금리 & 통화정책",
+    tag: "통화 정책",
+    title: "미 연준 긴급 발표, 예상보다 빠른 기준금리 인하 기류 감지",
+    summary: "미국 연방준비제도(Fed)가 물가 지표 안정 추세를 반영하여 하반기 기준금리 추가 조기 인하 가능성을 강력히 시사했습니다. 글로벌 투자 자금은 신흥국 채권과 신성장 기술 산업으로 재배치되기 시작했습니다.",
+    details: "연준 의장은 정례 브리핑을 통해 '인플레이션율이 통제 범위 안으로 지속 수렴하고 있어 금리 정상화 프로세스 속도를 조정할 여유가 생겼다'고 밝혔습니다. 이에 국내 기업들의 수출 환경과 환율 시장 또한 새로운 국면을 맞이하고 있습니다.",
+    keywords: ["미 연준", "인하 기류", "글로벌 유동성", "정상화 프로세스"],
+    quiz: {
+      question: "미 연방준비제도가 기준금리를 조기 인하할 경우, 글로벌 자산 시장에서 나타날 가능성이 가장 높은 파급력은 무엇일까요?",
+      options: [
+        "달러 가치의 무제한적인 수직 상승 및 초강세 지속",
+        "글로벌 채권 금리의 급격한 상승 압력 발생",
+        "신흥국 기술주 및 유망 신산업에 대한 자금 유입 확대",
+        "해외 벤처 캐피탈의 일체 자금 회수"
+      ],
+      correctAnswer: 2, // 3번
+      explanation: "미국의 금리 인하는 자본 조달 비용 하락과 글로벌 유동성 확장을 촉진하여, 신흥국이나 신산업에 활기를 불어넣는 촉매가 됩니다."
+    }
+  },
+  {
+    topic: "반도체 & AI 산업",
+    tag: "빅테크 트렌드",
+    title: "차세대 뉴로모픽 반도체 대량 양산 돌입... 기존 칩 대비 전력 소비 90% 급감",
+    summary: "글로벌 반도체 컨소시엄이 인간의 뇌신경망을 모방하여 스스로 연산하는 초저전력 '뉴로모픽 칩' 상용 양산에 최초로 돌입했습니다. 초거대 생성형 AI 구동에 따르는 엄청난 전력 인프라 대란을 돌파할 핵심 열쇠로 꼽힙니다.",
+    details: "이 메모리 반도체는 데이터 처리 병목현상을 제거하고 아날로그 방식으로 연산하여 발열과 소비 전력을 획기적으로 낮췄습니다. 차세대 모바일 기기 및 스마트 팩토리, 자율주행 정밀 연산 등에 대거 우선 이식될 전망입니다.",
+    keywords: ["뉴로모픽 반도체", "초저전력 칩", "인공지능 가속", "양산 돌입"],
+    quiz: {
+      question: "뉴로모픽(Neuromorphic) 반도체 칩이 일반 연산 메모리에 비해 가지는 절대적인 기술적 우위 요소는?",
+      options: [
+        "인간 뇌신경망 작동 방식 모사 기반의 획기적인 저전력·고효율",
+        "단순 가격의 1/100 수준 폭락",
+        "인터넷 연결이 완전히 차단된 하드웨어 보안 전용 칩셋",
+        "액체 질소 냉각 없이는 절대 불가능한 극한의 단일 초고속"
+      ],
+      correctAnswer: 0, // 1번
+      explanation: "인간의 뇌 메커니즘을 본떠 병렬 연산을 초저전력으로 수행할 수 있는 높은 에너지 효율이 가장 핵심적인 차별점입니다."
+    }
+  },
+  {
+    topic: "지정학 리스크 & 유가",
+    tag: "에너지 안보",
+    title: "동아시아 주요 해상 물류 거점 지연 리스크 점증... 해상 운임비 상승세",
+    summary: "글로벌 해상 운송로의 주요 운하 및 해협 통행이 일시 지연되면서 컨테이너선 운임 지수가 연초 대비 가파르게 상승했습니다. 원자재 가공 중심국인 아시아 경제권 전반에 원가 상승 부담이 커지고 있습니다.",
+    details: "정유사 및 주요 유통 대기업들은 긴급 물류 조달 태스크포스를 구성하고 항공 운송 비율 조정을 검토 중입니다. 지연된 리드타임으로 인한 제조업 부품 수급 불균형이 연쇄적인 물가 상승으로 전이될 가능성이 제기됩니다.",
+    keywords: ["해상 운임지수", "물류 지연", "공급망 병목", "원가 상승"],
+    quiz: {
+      question: "해상 물류 중심 통로가 지연될 때, 국내 수출입 제조 기업이 단기적으로 직면하는 가장 직접적인 타격은 무엇일까요?",
+      options: [
+        "원자재 조달 단가 하락으로 인한 이익 마진 급증",
+        "전국 모든 오프라인 대형마트의 수입 품목 강제 폐업",
+        "전 세계 선박 제조사들의 무제한 계약 직권 해지",
+        "리드타임(조달 소요시간) 지연 및 운송 원가 급증에 따른 비용 압박"
+      ],
+      correctAnswer: 3, // 4번
+      explanation: "해상 운송이 지연되면 물건을 전달받기까지의 총 시간(리드타임)이 늘어나고 우회 경로 운임비가 가산되어 기업 비용 부담이 극대화됩니다."
+    }
+  },
+  {
+    topic: "AI 인프라 & 클라우드",
+    tag: "신산업 데이터",
+    title: "글로벌 클라우드 시장, 생성형 AI 데이터센터 확보 경쟁으로 폭풍 성장",
+    summary: "거대 IT 기업들이 AI 학습을 위한 초대형 데이터센터 구축에 수십조 원을 쏟아부으며 클라우드 인프라 산업이 폭발적으로 성장하고 있습니다. 관련 서버 장비와 냉각 시스템 산업도 동반 호황을 맞았습니다.",
+    details: "IT 전문가들은 '데이터 저장 공간을 빌려주던 과거의 클라우드를 넘어, 이제는 고성능 AI 연산 환경 자체를 제공하는 서비스형 인프라(IaaS)로 진화했다'고 분석합니다. 이에 따라 관련 통신 장비와 친환경 에너지 수요도 급증하고 있습니다.",
+    keywords: ["데이터센터", "클라우드 서비스", "IaaS", "인프라 투자"],
+    quiz: {
+      question: "최근 거대 IT 기업들이 클라우드 산업에서 '초대형 데이터센터' 구축에 막대한 자본을 투자하는 주된 이유는 무엇일까요?",
+      options: [
+        "사무실용 개인 컴퓨터(PC) 생산을 중단하기 위해서",
+        "생성형 AI의 방대한 학습과 고성능 연산을 원활하게 지원하기 위해서",
+        "기존 인터넷망을 모두 위성 통신으로 전면 대체하기 위해서",
+        "모든 기업의 내부 전산망을 수동 서류 작업으로 되돌리기 위해서"
+      ],
+      correctAnswer: 1, // 2번
+      explanation: "고도화된 AI 모델을 학습시키고 실행하기 위해서는 막대한 양의 데이터를 초고속으로 처리할 수 있는 거대한 컴퓨팅 인프라(데이터센터)가 필수적이기 때문입니다."
+    }
+  },
+  {
+    topic: "그린 택소노미 & ESG",
+    tag: "친환경 신성장",
+    title: "EU 탄소국경조정제도(CBAM) 강화안 예고... 친환경 전력 전환이 필수 과제",
+    summary: "유럽연합(EU)이 수입 공산품의 탄소 배출량에 비용을 부과하는 탄소국경세 부과 대상 품목을 철강, 알루미늄에 이어 플라스틱과 정밀 화학 영역으로 전격 확대하겠다고 발표했습니다. 국내 수출 기업의 녹색 에너지 전환이 생존 조건이 되었습니다.",
+    details: "앞으로 화탄소 기반 전력을 다수 사용하는 아시아권 공급업체들은 상응하는 탄소세를 선제 납부해야 하므로 가격 경쟁력이 하락할 수 있습니다. 기업 현장에서는 무탄소 에너지원(CFE) 공급 인프라 구축이 최우선 과제로 떠올랐습니다.",
+    keywords: ["탄소국경세", "CBAM", "친환경 전환", "저탄소 에너지"],
+    quiz: {
+      question: "EU의 탄소국경조정제도(CBAM)가 본격 강화될 때 발생하는 실질적 현상은 무엇일까요?",
+      options: [
+        "배출가스를 방출하지 않는 전기차의 유럽 수입 전면 불허",
+        "전 세계 모든 공장의 의무적인 탄소 배출 제로화 달성 완료 선언",
+        "유럽 수출 시 탄소 배출이 많은 국가의 제품에 세금 성격의 환경 비용 추가 부과",
+        "탄소를 생산하는 전용 원자재의 글로벌 대체 거래소 전면 폐쇄"
+      ],
+      correctAnswer: 2, // 3번
+      explanation: "탄소국경세는 자국 대비 이산화탄소 배출 규제가 느슨한 국가에서 가공해 수입해오는 제품에 환경 비용을 관세처럼 부과하는 제도입니다."
+    }
+  }
+];
+
+const COMMON_SENSE_QUIZZES = [
+  {
+    id: 201,
+    category: "용어 상식",
+    question: "중앙은행이 시중에 풀린 통화량을 직접 조절하기 위해 금융기관을 상대로 국공채를 사고팔아 금리를 미세 조정하는 제도는?",
+    options: ["지급준비율 제도", "여수신제도", "재할인율제도", "공개시장운영"],
+    correctAnswer: 3, // 4번
+    explanation: "공개시장운영은 한국은행과 같은 통화 금융당국이 공개적인 금융시장에서 국공채 등을 거래해 시장 통화 유동성에 직접적인 변동 효과를 주는 방식입니다."
+  },
+  {
+    id: 202,
+    category: "경제 지표",
+    question: "한 나라의 영토 안에서 일정한 기간 동안 생산된 모든 최종 생산물의 시장가치를 합산한 가장 대표적인 경제 규모 측정 지표는?",
+    options: ["GDP (국내총생산)", "GNI (국민총소득)", "GNP (국민총생산)", "NDP (국내순생산)"],
+    correctAnswer: 0, // 1번
+    explanation: "국내총생산(Gross Domestic Product, GDP)은 영토 기준 국경 내부에서 일정 기간 생산해낸 서비스와 재화의 총합을 산정하는 공식 지표입니다."
+  }
+];
+
+// 건전한 모의 시장 트렌드 지표
+const INITIAL_PREDICTIONS = [
+  { id: "kospi", name: "KOSPI 지수", price: "2,685.40", change: "-0.22%", trend: "down" },
+  { id: "nasdaq", name: "NASDAQ 100", price: "18,610.15", change: "+1.05%", trend: "up" },
+  { id: "smp", name: "S&P 500 지수", price: "5,321.41", change: "+0.88%", trend: "up" }
+];
+
+// 학생 친화적 학습 보상 아이템 목록
+const STORE_ITEMS = [
+  { id: 'juice', name: '상큼한 과일 주스 교환권', price: 150, image: '🧃', desc: '오늘 하루도 공부 완료! 비타민 충전을 위한 과일 주스 교환권.' },
+  { id: 'snack', name: '편의점 샌드위치', price: 200, image: '🥪', desc: '출출할 때 든든하게 배를 채울 수 있는 맛있는 샌드위치.' },
+  { id: 'stationery', name: '예쁜 젤펜 세트 교환권', price: 300, image: '🖊️', desc: '필기를 더욱 즐겁게 만들어 줄 알록달록 젤펜 세트.' },
+  { id: 'book', name: '교보문고 5,000원 도서 상품권', price: 500, image: '📚', desc: '열심히 모은 원두로 내가 읽고 싶은 책을 구매해 보세요!' },
+  { id: 'shield', name: '오답 방패 (아이템)', price: 30, image: '🛡️', desc: '퀴즈를 풀다가 혹시 틀려도 원두 점수 차감을 1회 막아주는 든든한 방패.' }
+];
+
+function App() {
+  const [activeTab, setActiveTab] = useState('news');
+  const [currentDateString, setCurrentDateString] = useState(getTodayString());
+  
+  // 상태 관리 목록
+  const [newsList, setNewsList] = useState([]);
+  const [readNews, setReadNews] = useState({});
+  const [isBrewing, setIsBrewing] = useState(false);
+
+  // 학습 포인트 및 연속 달성 정보
+  const [userBeans, setUserBeans] = useState(() => {
+    const saved = parseInt(safeStorage.get(STORAGE_KEY_BEANS), 10);
+    return Number.isFinite(saved) ? saved : INITIAL_BEANS;
+  });
+  const [streak, setStreak] = useState(4);
+  const [userShields, setUserShields] = useState(1);
+
+  // 레벨 시스템
+  const userLevel = Math.floor(userBeans / 200) + 1;
+  const beansToNextLevel = 200 - (userBeans % 200);
+  const progressPercent = ((userBeans % 200) / 200) * 100;
+
+  // 퀴즈 관련 상태
+  const [quizType, setQuizType] = useState('daily');
+  const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
+  const [selectedAnswer, setSelectedAnswer] = useState(null);
+  const [isAnswerSubmitted, setIsAnswerSubmitted] = useState(false);
+  const [quizScore, setQuizScore] = useState({ correct: 0, total: 0 });
+  const [quizLogs, setQuizLogs] = useState({});
+
+  // 예측 및 상점
+  const [marketPreds, setMarketPreds] = useState(INITIAL_PREDICTIONS);
+  const [userVotes, setUserVotes] = useState({});
+  const [showVoteSuccess, setShowVoteSuccess] = useState(false);
+  const [purchaseHistory, setPurchaseHistory] = useState([]);
+  const [storeModalMsg, setStoreModalMsg] = useState("");
+
+  // Gemini API 연동 관련
+  const [apiKey, setApiKey] = useState("");
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [toastMsg, setToastMsg] = useState("");
+
+  // 초기 로드 시 당일 뉴스 구성
+  useEffect(() => {
+    brewDailyFreshNews(true);
+  }, []);
+
+  // 원두 포인트 변경 시 로컬 스토리지에 동기화
+  useEffect(() => {
+    safeStorage.set(STORAGE_KEY_BEANS, userBeans.toString());
+  }, [userBeans]);
+
+  const triggerToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(""), 3000);
+  };
+
+  // 실시간 무작위 기사 브루잉 시스템
+  const brewDailyFreshNews = (isInitial = false) => {
+    setIsBrewing(true);
+    setTimeout(() => {
+      if (!isInitial) {
+        const now = new Date();
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+        setCurrentDateString(`${getTodayString()} (실시간 브루잉 ${minutes}:${seconds})`);
+      } else {
+        setCurrentDateString(getTodayString());
+      }
+
+      // 무작위로 기사 선별
+      const shuffled = [...DAILY_NEWS_POOL].sort(() => 0.5 - Math.random());
+      const selectedNews = shuffled.slice(0, 3).map((item, index) => ({
+        ...item,
+        id: Date.now() + index,
+      }));
+
+      setNewsList(selectedNews);
+      setReadNews({});
+      setCurrentQuizIndex(0);
+      setSelectedAnswer(null);
+      setIsAnswerSubmitted(false);
+      setIsBrewing(false);
+
+      if (!isInitial) {
+        triggerToast("☕ 오늘자 새로운 분석 기사 3개가 신선하게 요약·로스팅되었습니다!");
+      }
+    }, 700);
+  };
+
+  // 기사 독해 완료 시 포인트 수확
+  const handleReadConfirm = (newsId) => {
+    if (!readNews[newsId]) {
+      setReadNews({ ...readNews, [newsId]: true });
+      setUserBeans(prev => prev + 10);
+      triggerToast("☕ 정독 인증 성공! 분석용 원두 +10개 수확 완료!");
+    }
+  };
+
+  // 퀴즈 탭 연동
+  const currentQuizList = quizType === 'daily' ? newsList : COMMON_SENSE_QUIZZES;
+  const currentItem = currentQuizList[currentQuizIndex];
+  const currentQuiz = currentItem ? (quizType === 'daily' ? currentItem.quiz : currentItem) : null;
+  const isCurrentQuizAlreadyAnswered = currentItem ? quizLogs[currentItem.id] !== undefined : false;
+
+  const goToQuizFromNews = (newsId) => {
+    const idx = newsList.findIndex(n => n.id === newsId);
+    if (idx !== -1) {
+      setActiveTab('quiz');
+      setQuizType('daily');
+      setCurrentQuizIndex(idx);
+      setSelectedAnswer(null);
+      setIsAnswerSubmitted(false);
+    }
+  };
+
+  // 퀴즈 정답 제출 처리
+  const handleSubmitQuizAnswer = (quiz, chosenIdx) => {
+    if (isAnswerSubmitted || isCurrentQuizAlreadyAnswered) return;
+
+    setSelectedAnswer(chosenIdx);
+    setIsAnswerSubmitted(true);
+
+    const isCorrect = chosenIdx === quiz.correctAnswer;
+
+    setQuizLogs(prev => ({
+      ...prev,
+      [currentItem.id]: {
+        chosen: chosenIdx,
+        correct: quiz.correctAnswer,
+        isCorrect
+      }
+    }));
+
+    if (isCorrect) {
+      setUserBeans(prev => prev + 25);
+      setQuizScore(prev => ({ ...prev, correct: prev.correct + 1, total: prev.total + 1 }));
+      triggerToast("🎯 대박! 정답을 맞혀 기분 좋은 보너스 원두 +25개 획득!");
+    } else {
+      setQuizScore(prev => ({ ...prev, total: prev.total + 1 }));
+      if (userShields > 0) {
+        setUserShields(prev => prev - 1);
+        triggerToast("🛡️ 아쉽게 정답 비껴감! 하지만 '오답 방패' 차단 효과로 원두 손실을 완전 방어했습니다.");
+      } else {
+        triggerToast("❌ 오답입니다. 하단의 브리핑 해설을 꼼꼼하게 읽어 거시 상식으로 만들어 보세요!");
+      }
+    }
+  };
+
+  // 퀴즈 보기별 동적 버튼 스타일 바인딩
+  const getOptionClass = (quiz, idx) => {
+    if (!currentItem) return '';
+    const log = quizLogs[currentItem.id];
+
+    if (isAnswerSubmitted) {
+      const isThisSelected = selectedAnswer === idx;
+      const isThisCorrect = quiz.correctAnswer === idx;
+
+      if (isThisCorrect) return 'bg-emerald-950/70 border-emerald-500 text-emerald-400 font-bold';
+      if (isThisSelected) return 'bg-rose-950/70 border-rose-500 text-rose-400 font-bold';
+      return 'bg-slate-800/20 border-slate-800 text-slate-600 cursor-default';
+    }
+
+    if (log) {
+      const isThisCorrect = quiz.correctAnswer === idx;
+      const wasChosen = log.chosen === idx;
+      if (isThisCorrect) return 'bg-emerald-950/70 border-emerald-500 text-emerald-400 font-bold';
+      if (wasChosen) return 'bg-rose-950/70 border-rose-500 text-rose-400';
+      return 'bg-slate-800/20 border-slate-800 text-slate-600 cursor-default';
+    }
+
+    return 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-700/60 hover:border-slate-500';
+  };
+
+  const handleNextQuiz = () => {
+    setSelectedAnswer(null);
+    setIsAnswerSubmitted(false);
+    if (currentQuizIndex < currentQuizList.length - 1) {
+      setCurrentQuizIndex(currentQuizIndex + 1);
+    } else {
+      setCurrentQuizIndex(0);
+      triggerToast("🔄 처음 퀴즈 학습 구역으로 한 바퀴 순환되었습니다!");
+    }
+  };
+
+  // 모의 시장 트렌드 예측 참여
+  const handleMarketVote = (id, direction) => {
+    if (userVotes[id]) {
+      triggerToast("오늘의 트렌드 예측 분석 실습은 이미 완료되었습니다.");
+      return;
+    }
+    setUserVotes({ ...userVotes, [id]: direction });
+    setUserBeans(prev => prev + 15);
+    setShowVoteSuccess(true);
+    setTimeout(() => setShowVoteSuccess(false), 2000);
+    triggerToast("📈 모의 시세 흐름 연구 성공! 학습 격려 원두 +15개 획득!");
+  };
+
+  const handleBuyItem = (item) => {
+    if (userBeans < item.price) {
+      setStoreModalMsg("수집한 원두가 다소 부족합니다! ☕ 기사를 성실히 탐구하고 퀴즈를 풀어 원두를 더 불려오세요.");
+      return;
+    }
+    setUserBeans(prev => prev - item.price);
+
+    if (item.id === 'shield') {
+      setUserShields(prev => prev + 1);
+      setStoreModalMsg("🛡️ 학습 보호 아이템 '오답 방패'를 장착했습니다!\n오답 감지 시 1회 자동으로 소비되며 포인트를 방어해 줍니다.");
+    } else {
+      const randomCouponCode = `REWARD-${Math.floor(100000 + Math.random() * 900000)}`;
+      setPurchaseHistory(prev => [...prev, { ...item, code: randomCouponCode, date: new Date().toLocaleDateString() }]);
+      setStoreModalMsg(`🎁 실물 모바일 교환 상품이 안전하게 발행되었습니다!\n보관함을 확인하세요.\n[발급핀코드: ${randomCouponCode}]`);
+    }
+  };
+
+  // --- Gemini API 실시간 학습지 생성 ---
+  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  // API 키가 없거나 호출에 실패했을 때 쓰는 체험용 시뮬레이션 기사
+  const buildSimulatedNews = (topic) => ({
+    id: Date.now(),
+    tag: `AI 브루: ${topic}`,
+    title: `[AI 전망분석] 글로벌 시장을 뒤흔드는 '${topic}' 신규 시너지 집중 진단`,
+    summary: `최근 거시 지표 변화 속에서 '${topic}'에 관한 산업 지표 동향이 매우 가파르게 상향 평준화되는 양상입니다. 미래 신성장 산업에 있어 주요 핵심 기술로 주목받고 있습니다.`,
+    details: `친환경 규제 및 글로벌 정책 기류와 맞물려 '${topic}' 핵심 가치 사슬 전반에 인프라 확장이 진행되고 있습니다. 다만 기술적 안정성과 독과점 우려가 일부 상존하므로, 지속적인 기술 모니터링 및 심층 연구가 유효할 것으로 평가받습니다.`,
+    keywords: [topic, "성장 자원", "안정성 연구", "기술 모니터링"],
+    quiz: {
+      question: `'${topic}' 산업 구조를 다룬 기사 내용 중 올바른 설명은 무엇인가요?`,
+      options: [
+        "해당 분야 기술 성장이 완전히 종결되었으므로 학술적 연구 가치가 없다.",
+        "정책적 인프라 확장이 이뤄지고 있으나 안정성 연구와 지속적인 모니터링이 병행되어야 한다.",
+        "미래 산업과는 전혀 무관한 구시대적 기술로 판명되었다.",
+        "실물 경제와 동떨어져 있어 어떠한 지표 상승도 발생하지 않는다."
+      ],
+      correctAnswer: 1, // 2번 선택지 정답
+      explanation: `기술 혁신 주기에는 인프라 성장과 더불어 안정성 검증이라는 과제가 동반되므로, 지속적인 모니터링과 다각적 연구가 필요하다는 것이 핵심입니다.`
+    }
+  });
+
+  const generateAICustomBrew = async () => {
+    const topic = aiPrompt.trim();
+    if (!topic) {
+      setAiError("추출하고 싶은 흥미로운 금융 단어 혹은 기업명을 적어주세요!");
+      return;
+    }
+    setAiLoading(true);
+    setAiError("");
+
+    // API Key 미설정 시: 체험용 시뮬레이션 동작
+    if (!apiKey.trim()) {
+      await sleep(1300);
+      setNewsList(prev => [buildSimulatedNews(topic), ...prev]);
+      setActiveTab('news');
+      setAiPrompt("");
+      setAiLoading(false);
+      triggerToast(`✨ '${topic}' 관련 AI 요약 기사 및 전용 상식 시험지가 갓 구워져 배달되었습니다!`);
+      return;
+    }
+
+    const systemPrompt = "너는 경제 분석 전문가이자 청소년을 위한 최고의 경제 상식 출제 위원이야. 사용자가 경제 용어, 기업, 시사 등 키워드를 제공하면 그 키워드를 건전하고 유익하게 심층 분석한 당일 뉴스 정보와, 이에 기반한 검증된 4지선다형 퀴즈 1개를 완성도 높은 JSON 양식으로 답변해야 해. 출력 포맷은 반드시 아래 JSON 규칙을 엄격히 준수해줘. 절대 도박, 사행성 단어를 쓰지 마.\n\nJSON Output Format:\n{\n  \"tag\": \"분류 태그\",\n  \"title\": \"기사 헤드라인 제목\",\n  \"summary\": \"3줄 이내의 명확한 핵심 뉴스 요약 내용\",\n  \"details\": \"배경 지식을 상세하게 분석한 5줄 내외의 추가 설명 본문\",\n  \"keywords\": [\"키워드1\", \"키워드2\"],\n  \"quiz\": {\n    \"question\": \"본문 내용에 근거한 4지선다형 질문\",\n    \"options\": [\"보기1\", \"보기2\", \"보기3\", \"보기4\"],\n    \"correctAnswer\": 0, \n    \"explanation\": \"친절하고 쉬운 정답 해설\"\n  }\n}\n*주의: correctAnswer는 0, 1, 2, 3 중 정답 인덱스 숫자여야 함.";
+
+    const MAX_RETRIES = 3;
+    let delay = 1000;
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey.trim() },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: `사용자 키워드: ${topic}` }] }],
+              systemInstruction: { parts: [{ text: systemPrompt }] },
+              generationConfig: { responseMimeType: "application/json" }
+            })
+          }
+        );
+
+        if (!response.ok) {
+          const errBody = await response.json().catch(() => ({}));
+          const err = new Error(errBody?.error?.message || `HTTP ${response.status}`);
+          err.status = response.status;
+          throw err;
+        }
+
+        const data = await response.json();
+        const jsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!jsonText) throw new Error("AI 응답이 비어 있습니다.");
+        const parsed = JSON.parse(jsonText.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, ''));
+
+        // 퀴즈 형식 검증 (보기 4개 + 정답 인덱스 0~3)
+        const q = parsed.quiz;
+        const quizIsValid = q && Array.isArray(q.options) && q.options.length === 4 && [0, 1, 2, 3].includes(Number(q.correctAnswer));
+
+        const apiFormatted = {
+          id: Date.now(),
+          tag: parsed.tag || "AI 브루잉",
+          title: parsed.title || `${topic} 관련 이슈 분석`,
+          summary: parsed.summary || "분석 정보를 축적하지 못했습니다.",
+          details: parsed.details || "",
+          keywords: Array.isArray(parsed.keywords) && parsed.keywords.length ? parsed.keywords : [topic],
+          quiz: quizIsValid ? { ...q, correctAnswer: Number(q.correctAnswer) } : {
+            question: `${topic} 관련 기본 문제`,
+            options: ["보기 1", "보기 2", "보기 3", "보기 4"],
+            correctAnswer: 0,
+            explanation: "데이터 정산 중 누락되어 대체된 퀴즈입니다."
+          }
+        };
+
+        setNewsList(prev => [apiFormatted, ...prev]);
+        setActiveTab('news');
+        setAiPrompt("");
+        setAiLoading(false);
+        triggerToast("🎉 맞춤형 뉴스 브리핑과 전용 학습 퀴즈가 성공적으로 도착했습니다!");
+        return;
+      } catch (err) {
+        lastError = err;
+        // 키 오류·잘못된 모델명 등은 재시도해도 소용없으므로 바로 중단
+        if (err.status && [400, 401, 403, 404].includes(err.status)) break;
+        if (attempt < MAX_RETRIES) {
+          await sleep(delay);
+          delay *= 2;
+        }
+      }
+    }
+
+    // 최종 실패 시: 체험 시뮬레이션 기사로 대체
+    console.error('[MoneyBrew] Gemini 호출 실패:', lastError);
+    setNewsList(prev => [buildSimulatedNews(topic), ...prev]);
+    setAiPrompt("");
+    setAiLoading(false);
+    setAiError(`API 연결에 실패했습니다 (${lastError?.message || '알 수 없는 오류'}). 대신 체험 시뮬레이션 기사를 브리핑 탭에 추가했어요. API 키와 모델명(GEMINI_MODEL)을 확인해 주세요.`);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans pb-20 md:pb-0">
+      
+      {/* --- 글로벌 모바일/데스크탑 알림창 --- */}
+      {toastMsg && (
+        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-emerald-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-bounce border border-emerald-400">
+          <IconCoffee className="w-5 h-5 text-amber-300" />
+          <span className="font-bold text-xs md:text-sm">{toastMsg}</span>
+        </div>
+      )}
+
+      {/* --- 상단 탑바 영역 --- */}
+      <header className="sticky top-0 z-40 bg-slate-800/90 backdrop-blur-md border-b border-slate-700/60 px-4 py-3 md:px-8 flex items-center justify-between">
+        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab('news')}>
+          <div className="p-2 bg-gradient-to-tr from-amber-600 to-emerald-600 rounded-xl shadow-md">
+            <IconCoffee className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-base md:text-lg font-black tracking-tight bg-gradient-to-r from-amber-400 via-emerald-400 to-emerald-200 bg-clip-text text-transparent">
+              머니브루 <span className="text-xs font-normal text-slate-400 hidden sm:inline">Money Brew</span>
+            </h1>
+            <p className="text-[10px] text-amber-400/90 font-medium leading-none">하루 10분, 유익한 실시간 경제 상식 발전소</p>
+          </div>
+        </div>
+
+        {/* 유저 인벤토리 및 능력치 보드 */}
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1 bg-slate-700/50 px-2.5 py-1 rounded-lg border border-slate-600/40">
+            <IconFlame className="w-4 h-4 text-orange-500 fill-orange-500" />
+            <span className="text-[11px] font-bold text-orange-400">{streak}일 연속</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-amber-950/40 px-3 py-1 rounded-lg border border-amber-600/30">
+            <span className="text-sm">☕</span>
+            <span className="text-xs md:text-sm font-black text-amber-400">{userBeans.toLocaleString()}</span>
+            <span className="text-[10px] text-amber-500/80 font-bold hidden sm:inline">Beans</span>
+          </div>
+
+          <button 
+            onClick={() => setShowApiKeyModal(true)}
+            className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-colors"
+            title="Gemini API 설정"
+          >
+            <IconSettings className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      {/* --- 콘텐츠 컨테이너 구역 --- */}
+      <div className="flex flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 gap-6">
+        
+        {/* 데스크탑 사이드 네비게이터 */}
+        <aside className="hidden md:flex flex-col w-64 gap-2 shrink-0">
+          <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/40 mb-3 text-center">
+            <span className="text-2xl">🌱</span>
+            <h3 className="font-bold text-slate-200 text-xs mt-1">상식 레벨: Lv.{userLevel}</h3>
+            <div className="w-full bg-slate-700 h-2 rounded-full mt-2 overflow-hidden">
+              <div className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full transition-all duration-500" style={{ width: `${progressPercent}%` }}></div>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1.5">다음 레벨까지 원두 {beansToNextLevel}개 남음</p>
+          </div>
+
+          <button
+            onClick={() => setActiveTab('news')}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all text-sm ${
+              activeTab === 'news'
+                ? 'bg-gradient-to-r from-emerald-950/60 to-slate-800 text-emerald-400 border-l-4 border-emerald-500'
+                : 'hover:bg-slate-800/40 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <IconNewspaper className="w-5 h-5" />
+            <span>당일 데일리 시사 브리핑</span>
+          </button>
+
+          <button
+            onClick={() => { setActiveTab('quiz'); setCurrentQuizIndex(0); }}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all text-sm ${
+              activeTab === 'quiz'
+                ? 'bg-gradient-to-r from-emerald-950/60 to-slate-800 text-emerald-400 border-l-4 border-emerald-500'
+                : 'hover:bg-slate-800/40 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <IconBrain className="w-5 h-5" />
+            <span>오늘자 팩트 체크 퀴즈</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('predict')}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all text-sm ${
+              activeTab === 'predict'
+                ? 'bg-gradient-to-r from-emerald-950/60 to-slate-800 text-emerald-400 border-l-4 border-emerald-500'
+                : 'hover:bg-slate-800/40 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <IconTrendingUp className="w-5 h-5" />
+            <span>시장 트렌드 예측 학습실</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('ai-custom')}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all text-sm ${
+              activeTab === 'ai-custom'
+                ? 'bg-gradient-to-r from-amber-950/40 to-slate-800 text-amber-400 border-l-4 border-amber-500'
+                : 'hover:bg-slate-800/40 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <IconSparkles className="w-5 h-5 text-amber-400" />
+            <span className="flex items-center gap-1">
+              AI 관심 테마 추출기
+              <span className="bg-amber-500/20 text-amber-400 text-[8px] px-1.5 py-0.5 rounded-full font-bold">HOT</span>
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('shop')}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all text-sm ${
+              activeTab === 'shop'
+                ? 'bg-gradient-to-r from-emerald-950/60 to-slate-800 text-emerald-400 border-l-4 border-emerald-500'
+                : 'hover:bg-slate-800/40 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <IconAward className="w-5 h-5" />
+            <span>학업 리워드 교환소</span>
+          </button>
+        </aside>
+
+        {/* --- 우측 가로 본문 주 화면 구획 --- */}
+        <main className="flex-1 min-w-0 bg-slate-800/30 p-4 md:p-6 rounded-3xl border border-slate-700/30 overflow-y-auto max-h-[85vh]">
+          
+          {/* ================= 탭 1: 당일 실시간 요약 뉴스 브리핑 ================= */}
+          {activeTab === 'news' && (
+            <div className="space-y-6">
+              
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <h2 className="text-xl md:text-2xl font-black text-slate-100">☕ 실시간 데일리 브리핑</h2>
+                  </div>
+                  <p className="text-xs md:text-sm text-slate-400 mt-1">
+                    기준 시각: <strong className="text-amber-400 font-mono">{currentDateString}</strong>
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => brewDailyFreshNews(false)}
+                  disabled={isBrewing}
+                  className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-emerald-500/50 text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                >
+                  <IconRefresh className={`w-3.5 h-3.5 text-emerald-400 ${isBrewing ? 'animate-spin' : ''}`} />
+                  <span>새 뉴스 로스팅하기 (새로고침)</span>
+                </button>
+              </div>
+
+              {isBrewing ? (
+                <div className="flex flex-col items-center justify-center py-20 space-y-3">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-400" />
+                  <p className="text-xs text-slate-400 font-bold animate-pulse">오늘의 시사 팩트를 여과 및 빌드하고 있습니다...</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {newsList.map((news) => (
+                    <div 
+                      key={news.id}
+                      className={`relative overflow-hidden bg-gradient-to-b from-slate-800/95 to-slate-900/95 p-5 md:p-6 rounded-2xl border transition-all ${
+                        readNews[news.id] 
+                          ? 'border-slate-800 opacity-75 shadow-none' 
+                          : 'border-slate-700/80 hover:border-emerald-500/40 hover:shadow-lg'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="bg-emerald-950 text-emerald-400 border border-emerald-800/60 text-[10px] px-2.5 py-1 rounded font-black uppercase">
+                          {news.tag}
+                        </span>
+                        
+                        {readNews[news.id] ? (
+                          <span className="flex items-center gap-1 text-[10px] font-black text-slate-500 bg-slate-900 px-2 py-1 rounded">
+                            <IconCheck className="w-3.5 h-3.5" /> 완독 확인
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-black text-amber-400 bg-amber-950/50 border border-amber-800/50 px-2.5 py-1 rounded animate-pulse">
+                            ☕ 요약읽기 대기 (+10 원두 보너스)
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="text-base md:text-lg font-extrabold text-slate-100 leading-snug mb-2">
+                        {news.title}
+                      </h3>
+
+                      <p className="text-xs md:text-sm text-slate-300 leading-relaxed bg-slate-950/40 p-4 rounded-xl border border-slate-900 mb-4 whitespace-pre-line">
+                        {news.summary}
+                      </p>
+
+                      {news.details && (
+                        <details className="group mb-4 bg-slate-800/20 rounded-lg p-3 border border-slate-700/30">
+                          <summary className="text-xs text-slate-400 cursor-pointer list-none flex items-center justify-between font-bold select-none group-open:text-emerald-400">
+                            <span>🔍 3분 배경지식 수혈받기</span>
+                            <IconChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90" />
+                          </summary>
+                          <p className="text-xs text-slate-300 mt-2 leading-relaxed pl-1 border-l-2 border-emerald-500 whitespace-pre-line">
+                            {news.details}
+                          </p>
+                        </details>
+                      )}
+
+                      <div className="flex flex-wrap gap-1.5 mb-4">
+                        {news.keywords.map((word, idx) => (
+                          <span key={idx} className="text-[10px] text-slate-400 bg-slate-900/60 px-2.5 py-0.5 rounded">
+                            #{word}
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2 border-t border-slate-800/80 pt-4">
+                        <button
+                          onClick={() => handleReadConfirm(news.id)}
+                          disabled={readNews[news.id]}
+                          className={`flex-1 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+                            readNews[news.id]
+                              ? 'bg-slate-800 text-slate-500 cursor-default'
+                              : 'bg-slate-700 hover:bg-slate-600 text-white'
+                          }`}
+                        >
+                          정독 완료하고 원두 모으기
+                        </button>
+
+                        <button
+                          onClick={() => goToQuizFromNews(news.id)}
+                          className="flex-1 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-md"
+                        >
+                          <IconBrain className="w-4 h-4" />
+                          이 기사 기반 퀴즈 도전자격 획득
+                        </button>
+                      </div>
+
+                    </div>
+                  ))}
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* ================= 탭 2: 데일리 퀴즈 챌린지 구역 ================= */}
+          {activeTab === 'quiz' && (() => {
+            if (!currentItem) {
+              return (
+                <div className="text-center py-12">
+                  <p className="text-slate-400 text-sm">준비된 시사 문제가 없습니다. 뉴스를 먼저 추출해 주세요.</p>
+                  <button onClick={() => brewDailyFreshNews(true)} className="mt-4 px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold">
+                    데일리 뉴스 받아오기
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-6">
+                
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-700 pb-4">
+                  <div>
+                    <h2 className="text-xl md:text-2xl font-black text-slate-100 flex items-center gap-1.5">
+                      🧠 데일리 브루 상식 퀴즈
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1">오늘 입수한 지식을 퀴즈로 풀며 진짜 나의 상식으로 각인합니다.</p>
+                  </div>
+
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => { setQuizType('daily'); setCurrentQuizIndex(0); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+                        quizType === 'daily' ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      실시간 기사형 ({newsList.length})
+                    </button>
+                    <button
+                      onClick={() => { setQuizType('common'); setCurrentQuizIndex(0); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
+                        quizType === 'common' ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      상식 지표형 ({COMMON_SENSE_QUIZZES.length})
+                    </button>
+                  </div>
+                </div>
+
+                {/* 대시 스탯 보드 */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/50 text-center">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">퀴즈 척도</p>
+                    <p className="text-base font-black text-slate-200 mt-0.5">{currentQuizIndex + 1} / {currentQuizList.length}</p>
+                  </div>
+                  <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/50 text-center">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">전체 정답률</p>
+                    <p className="text-base font-black text-emerald-400 mt-0.5">
+                      {quizScore.total > 0 ? `${Math.round((quizScore.correct / quizScore.total) * 100)}%` : '0%'}
+                    </p>
+                  </div>
+                  <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/50 text-center">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">오답 방패 보유</p>
+                    <p className="text-base font-black text-blue-400 mt-0.5">🛡️ {userShields}회</p>
+                  </div>
+                  <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/50 text-center">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">카테고리</p>
+                    <p className="text-xs font-bold text-slate-300 mt-1 truncate">
+                      {quizType === 'daily' ? currentItem.tag : currentItem.category}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 퀴즈 박스 본체 */}
+                <div className="bg-slate-800/40 p-5 md:p-8 rounded-2xl border border-slate-700/60 shadow-xl space-y-6">
+                  {quizType === 'daily' && (
+                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-[11px] text-slate-400">
+                      <span className="font-extrabold text-emerald-500 mr-1.5">[참고 헤드라인]</span>
+                      {currentItem.title}
+                    </div>
+                  )}
+
+                  <div>
+                    <span className="inline-block bg-slate-700 text-slate-300 text-[9px] px-2 py-0.5 rounded font-black mb-2.5">QUESTION</span>
+                    <h3 className="text-base md:text-lg font-bold text-slate-100 leading-snug">
+                      {currentQuiz.question}
+                    </h3>
+                  </div>
+
+                  {/* 4지선다 보물 고르기 */}
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {currentQuiz.options.map((option, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleSubmitQuizAnswer(currentQuiz, idx)}
+                        disabled={isAnswerSubmitted || isCurrentQuizAlreadyAnswered}
+                        className={`w-full p-3.5 text-left rounded-xl border text-xs md:text-sm transition-all flex items-center justify-between ${getOptionClass(currentQuiz, idx)}`}
+                      >
+                        <span className="flex items-center gap-3">
+                          <span className="w-5.5 h-5.5 flex items-center justify-center rounded-full bg-slate-900 text-[10px] font-black border border-slate-700 shrink-0">
+                            {idx + 1}
+                          </span>
+                          <span>{option}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* 전문가 설명 개방 구역 */}
+                  {(isAnswerSubmitted || isCurrentQuizAlreadyAnswered) && (
+                    <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-850 space-y-1.5 animate-fadeIn">
+                      <p className="text-xs font-black text-amber-500">💡 머니브루 해설 요약</p>
+                      <p className="text-xs md:text-sm text-slate-300 leading-relaxed">
+                        {currentQuiz.explanation}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 퀴즈 하단 컨트롤 조작바 */}
+                  <div className="flex justify-between items-center border-t border-slate-700/50 pt-4">
+                    <button
+                      onClick={() => {
+                        if (currentQuizIndex > 0) {
+                          setCurrentQuizIndex(currentQuizIndex - 1);
+                          setSelectedAnswer(null);
+                          setIsAnswerSubmitted(false);
+                        }
+                      }}
+                      disabled={currentQuizIndex === 0}
+                      className="px-3.5 py-1.5 rounded-lg text-xs font-bold border border-slate-700 text-slate-400 disabled:opacity-30"
+                    >
+                      이전 문제
+                    </button>
+                    <button
+                      onClick={handleNextQuiz}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-black rounded-lg transition-all"
+                    >
+                      {currentQuizIndex < currentQuizList.length - 1 ? '다음 문제 도전' : '처음 퀴즈로 순환'}
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            );
+          })()}
+
+          {/* ================= 탭 3: 내일의 시장 트렌드 예측 학습 ================= */}
+          {activeTab === 'predict' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-700 pb-4">
+                <div>
+                  <h2 className="text-xl md:text-2xl font-black text-slate-100 flex items-center gap-1.5">📈 시장 트렌드 예측 학습실</h2>
+                  <p className="text-xs text-slate-400 mt-1">오늘 파악한 시사 트렌드를 바탕으로 내일 시장 지표의 방향성(상승/하락)을 분석해 보세요.</p>
+                </div>
+                <span className="text-xs bg-slate-800 px-3 py-1 rounded-full border border-slate-700 text-slate-300">
+                  매일 밤 23:30 정산 마감
+                </span>
+              </div>
+
+              {showVoteSuccess && (
+                <div className="bg-emerald-950/70 border border-emerald-500 p-4 rounded-xl text-center text-xs text-emerald-300 animate-pulse">
+                  🗳️ 시장 트렌드 예측 분석표가 제출되었습니다! 실제 지표 흐름과 일치 시 내일 원두 보상이 자동으로 제공됩니다.
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {marketPreds.map((item) => {
+                  const hasVoted = userVotes[item.id] !== undefined;
+                  const votedUp = userVotes[item.id] === 'up';
+                  const votedDown = userVotes[item.id] === 'down';
+
+                  return (
+                    <div key={item.id} className="bg-slate-800/40 p-4.5 rounded-2xl border border-slate-700/60 flex flex-col justify-between space-y-4">
+                      <div>
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-slate-400">모의 학습 기준시세</span>
+                          <span className={`font-black ${item.trend === 'up' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {item.change}
+                          </span>
+                        </div>
+                        <h4 className="font-extrabold text-sm text-slate-200 mt-2">{item.name}</h4>
+                        <p className="text-base font-black text-slate-100 mt-0.5">{item.price}</p>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => handleMarketVote(item.id, 'up')}
+                            disabled={hasVoted}
+                            className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                              hasVoted
+                                ? votedUp
+                                  ? 'bg-emerald-600 text-slate-950'
+                                  : 'bg-slate-800 text-slate-600'
+                                : 'bg-slate-800 hover:bg-emerald-900/40 text-slate-300 border border-transparent'
+                            }`}
+                          >
+                            ▲ 상승 예측
+                          </button>
+                          <button
+                            onClick={() => handleMarketVote(item.id, 'down')}
+                            disabled={hasVoted}
+                            className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                              hasVoted
+                                ? votedDown
+                                  ? 'bg-rose-600 text-slate-950'
+                                  : 'bg-slate-800 text-slate-600'
+                                : 'bg-slate-800 hover:bg-rose-900/40 text-slate-300 border border-transparent'
+                            }`}
+                          >
+                            ▼ 하락 예측
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="bg-slate-800/20 p-4.5 rounded-xl border border-slate-700/40 text-xs text-slate-400 leading-relaxed">
+                <p className="font-extrabold text-slate-300 mb-1">💡 청소년 안심 트렌드 분석 가이드</p>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  <li>이 지표 연구실은 학생 유저의 거시경제 지표 이해를 돕기 위한 <strong className="text-slate-300">비상업적 가상 교재</strong>입니다.</li>
+                  <li>실제 금전 결제나 배팅성 요소는 완전히 차단되어 있으며, 예측 적중 시 앱 내부 학습 동기부여를 위한 원두 포인트 보상만 제공됩니다.</li>
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* ================= 탭 4: AI 관심 테마 추출기 ================= */}
+          {activeTab === 'ai-custom' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-700 pb-4">
+                <div>
+                  <h2 className="text-xl md:text-2xl font-black text-slate-100 flex items-center gap-1.5">
+                    <IconSparkles className="w-6 h-6 text-amber-400" />
+                    AI 관심 테마 추출기
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    학교에서 배운 경제 용어나 궁금한 신산업 트렌드를 직접 입력해보세요. AI가 유익한 학습 자료를 만들어 줍니다.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700/60 space-y-4">
+                {/* 고정 검색 태그 */}
+                <div className="flex flex-wrap gap-2">
+                  {["전기차 배터리 시장", "클라우드 서비스 발전", "저출산과 경제", "ESG 경영 트렌드"].map(chip => (
+                    <button
+                      key={chip}
+                      onClick={() => setAiPrompt(chip)}
+                      className="text-xs bg-slate-900 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-800 transition-colors"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 입력 폼 */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="알고 싶은 경제 및 상식 키워드를 자유롭게 적어주세요..."
+                    className="flex-1 bg-slate-950 text-slate-100 text-xs md:text-sm px-4 py-3 rounded-xl border border-slate-800 focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    onClick={generateAICustomBrew}
+                    disabled={aiLoading}
+                    className="bg-gradient-to-r from-amber-600 to-emerald-600 text-slate-950 font-black text-xs px-6 py-3 rounded-xl flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    {aiLoading ? (
+                      <span className="flex items-center gap-1">
+                        <svg className="animate-spin h-3.5 w-3.5 text-slate-950" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        학습지 생성 중...
+                      </span>
+                    ) : "AI 추출 시작"}
+                  </button>
+                </div>
+
+                {aiError && <p className="text-xs text-rose-400 bg-rose-950/30 p-2.5 rounded border border-rose-900/20">{aiError}</p>}
+              </div>
+            </div>
+          )}
+
+          {/* ================= 탭 5: 리워드 쿠폰 교환 상점 ================= */}
+          {activeTab === 'shop' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-700 pb-4">
+                <div>
+                  <h2 className="text-xl md:text-2xl font-black text-slate-100">🛍️ 학업 리워드 상점</h2>
+                  <p className="text-xs text-slate-400 mt-1">열심히 퀴즈를 풀고 모은 소중한 원두 포인트로 도서 교환권 등 유익한 아이템을 획득하세요.</p>
+                </div>
+              </div>
+
+              {/* 교환 모달 알림 */}
+              {storeModalMsg && (
+                <div className="bg-slate-900 border border-emerald-500/50 p-4 rounded-xl text-center space-y-2 text-xs">
+                  <p className="font-bold text-emerald-400 whitespace-pre-line">{storeModalMsg}</p>
+                  <button onClick={() => setStoreModalMsg("")} className="bg-slate-800 px-3 py-1.5 rounded font-black text-[10px] text-slate-300 hover:text-white">닫기</button>
+                </div>
+              )}
+
+              {/* 상품 그리드 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {STORE_ITEMS.map((item) => {
+                  const hasEnough = userBeans >= item.price;
+                  return (
+                    <div key={item.id} className="bg-slate-800/50 p-4 rounded-xl border border-slate-700/50 flex flex-col justify-between space-y-3">
+                      <div className="h-24 bg-slate-950 rounded-lg flex items-center justify-center text-3xl">
+                        {item.image}
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-xs text-slate-200">{item.name}</h4>
+                        <p className="text-[10px] text-slate-400 mt-1">{item.desc}</p>
+                      </div>
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-700/30">
+                        <span className="text-xs font-black text-amber-400">☕ {item.price} Beans</span>
+                        <button
+                          onClick={() => handleBuyItem(item)}
+                          disabled={!hasEnough}
+                          className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all ${
+                            hasEnough ? 'bg-amber-500 text-slate-950 hover:bg-amber-400' : 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                          }`}
+                        >
+                          교환하기
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 쿠폰 내역 */}
+              {purchaseHistory.length > 0 && (
+                <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 space-y-2 text-xs">
+                  <p className="font-black text-slate-300">🎁 발급된 마이 보관함</p>
+                  <div className="space-y-1.5 pt-1">
+                    {purchaseHistory.map((item, idx) => (
+                      <div key={idx} className="bg-slate-800 p-2.5 rounded border border-slate-700/40 flex justify-between items-center text-[11px]">
+                        <span>{item.name}</span>
+                        <strong className="font-mono text-emerald-400">{item.code}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+        </main>
+      </div>
+
+      {/* --- 모바일 전용 하단 고정 네비게이션 바 --- */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 md:hidden bg-slate-950/95 backdrop-blur-md border-t border-slate-800/80 flex justify-around items-center py-2.5 px-2">
+        <button onClick={() => setActiveTab('news')} className={`flex flex-col items-center gap-1 ${activeTab === 'news' ? 'text-emerald-400' : 'text-slate-400'}`}>
+          <IconNewspaper className="w-5 h-5" />
+          <span className="text-[9px] font-bold">브리핑</span>
+        </button>
+        <button onClick={() => { setActiveTab('quiz'); setCurrentQuizIndex(0); }} className={`flex flex-col items-center gap-1 ${activeTab === 'quiz' ? 'text-emerald-400' : 'text-slate-400'}`}>
+          <IconBrain className="w-5 h-5" />
+          <span className="text-[9px] font-bold">퀴즈</span>
+        </button>
+        <button onClick={() => setActiveTab('predict')} className={`flex flex-col items-center gap-1 ${activeTab === 'predict' ? 'text-emerald-400' : 'text-slate-400'}`}>
+          <IconTrendingUp className="w-5 h-5" />
+          <span className="text-[9px] font-bold">트렌드</span>
+        </button>
+        <button onClick={() => setActiveTab('ai-custom')} className={`flex flex-col items-center gap-1 ${activeTab === 'ai-custom' ? 'text-amber-400' : 'text-slate-400'}`}>
+          <IconSparkles className="w-5 h-5" />
+          <span className="text-[9px] font-bold">AI추출</span>
+        </button>
+        <button onClick={() => setActiveTab('shop')} className={`flex flex-col items-center gap-1 ${activeTab === 'shop' ? 'text-emerald-400' : 'text-slate-400'}`}>
+          <IconAward className="w-5 h-5" />
+          <span className="text-[9px] font-bold">상점</span>
+        </button>
+      </nav>
+
+      {/* --- 설정용 Gemini API 관리 모달 --- */}
+      {showApiKeyModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700/80 max-w-md w-full p-6 rounded-2xl space-y-4 shadow-2xl relative animate-fadeIn">
+            <button onClick={() => setShowApiKeyModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-100">✕</button>
+            <h3 className="font-black text-slate-100 text-sm">Google Gemini API 설정</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">개인 구글 AI 스튜디오 API 키를 지정해두면, 정해진 기재 외에도 AI가 실시간 금융 데이터베이스를 추출해 무제한 숏폼 뉴스 및 퀴즈 카드를 만들어 줍니다.</p>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="AI-zaSy... 형태의 키를 붙여넣으세요"
+              className="w-full bg-slate-950 text-slate-100 text-xs p-2.5 rounded border border-slate-800 focus:outline-none focus:border-emerald-500"
+            />
+            <div className="flex gap-2">
+              <button onClick={() => { setApiKey(""); setShowApiKeyModal(false); triggerToast("체험 세션 모드로 안전하게 리셋되었습니다."); }} className="flex-1 py-2 text-xs border border-slate-700 rounded text-slate-300">초기화</button>
+              <button onClick={() => setShowApiKeyModal(false)} className="flex-1 py-2 text-xs bg-emerald-600 text-slate-950 font-bold rounded">저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+// --- 앱 마운트 ---
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+
+  <noscript>이 앱을 사용하려면 브라우저에서 JavaScript를 켜 주세요.</noscript>
+</body>
+</html>
